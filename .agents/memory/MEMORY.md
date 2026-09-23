@@ -1,1 +1,2 @@
 - [Ambiguous Google sync responses](google-sync-ambiguity.md) — verify remote writes by memo code before retrying; a lost response does not mean the write failed.
+- [GitHub connector publication](github-publication.md) — connector API access does not grant Git CLI push credentials; distinguish a code snapshot from transferred Git history.
