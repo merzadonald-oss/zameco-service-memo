@@ -1,0 +1,1 @@
+- [Ambiguous Google sync responses](google-sync-ambiguity.md) — verify remote writes by memo code before retrying; a lost response does not mean the write failed.

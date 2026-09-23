@@ -1,0 +1,324 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: memos
+    description: Service memo capture, review, and sync
+  - name: settings
+    description: Google Workspace sync configuration
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [memos]
+      summary: Get scanning and sync summary
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+  /memos:
+    get:
+      operationId: listMemos
+      tags: [memos]
+      summary: List recent service memos
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [all, pending, synced, failed]
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Memo history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ServiceMemo"
+    post:
+      operationId: createMemo
+      tags: [memos]
+      summary: Save and sync a verified service memo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoSubmission"
+      responses:
+        "201":
+          description: Memo saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceMemo"
+  /memos/next-code:
+    get:
+      operationId: getNextMemoCode
+      tags: [memos]
+      summary: Reserve the next daily service memo code
+      responses:
+        "200":
+          description: Next code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoCode"
+  /memos/extract:
+    post:
+      operationId: extractMemo
+      tags: [memos]
+      summary: Extract service memo fields from a scanned image
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoExtractionInput"
+      responses:
+        "200":
+          description: Extracted memo fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoExtraction"
+  /memos/{id}/retry:
+    post:
+      operationId: retryMemoSync
+      tags: [memos]
+      summary: Retry Google Drive and Sheets sync
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Updated memo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceMemo"
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get Google Workspace configuration
+      responses:
+        "200":
+          description: Current settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update Google Workspace configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsInput"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+  /drive/items:
+    get:
+      operationId: listDriveItems
+      tags: [settings]
+      summary: Browse connected Google Drive folders and spreadsheets
+      parameters:
+        - in: query
+          name: parentId
+          schema: { type: string, default: root }
+        - in: query
+          name: type
+          required: true
+          schema:
+            type: string
+            enum: [folder, spreadsheet]
+      responses:
+        "200":
+          description: Drive items in the selected directory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriveItemList"
+  /sheets/{spreadsheetId}/tabs:
+    get:
+      operationId: listSheetTabs
+      tags: [settings]
+      summary: List tabs in a connected spreadsheet
+      parameters:
+        - in: path
+          name: spreadsheetId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Spreadsheet tabs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetTabList"
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    SyncStatus:
+      type: string
+      enum: [pending, synced, failed]
+    MemoCode:
+      type: object
+      required: [code, dateReceived]
+      properties:
+        code: { type: string }
+        dateReceived: { type: string, format: date }
+    MemoFields:
+      type: object
+      required:
+        [serviceMemoCode, dateReceived, dateOfServiceMemo, natureOfComplaint, accountNumber, consumerName, address, totalAmountPaid, orArNumber]
+      properties:
+        serviceMemoCode: { type: string }
+        dateReceived: { type: string, format: date }
+        dateOfServiceMemo: { type: string }
+        natureOfComplaint: { type: string }
+        accountNumber: { type: string }
+        consumerName: { type: string }
+        address: { type: string }
+        totalAmountPaid: { type: string }
+        orArNumber: { type: string }
+    MemoExtraction:
+      allOf:
+        - $ref: "#/components/schemas/MemoFields"
+        - type: object
+          required: [confidence, warnings]
+          properties:
+            confidence: { type: number, minimum: 0, maximum: 1 }
+            warnings:
+              type: array
+              items: { type: string }
+    MemoExtractionInput:
+      type: object
+      required: [imageData, imageMimeType, serviceMemoCode, dateReceived]
+      properties:
+        imageData: { type: string, description: Base64-encoded processed image }
+        imageMimeType: { type: string, enum: [image/jpeg, image/webp, image/png] }
+        serviceMemoCode: { type: string }
+        dateReceived: { type: string, format: date }
+    MemoSubmission:
+      allOf:
+        - $ref: "#/components/schemas/MemoFields"
+        - type: object
+          required: [imageData, imageMimeType]
+          properties:
+            imageData: { type: string }
+            imageMimeType: { type: string, enum: [image/jpeg, image/webp, image/png] }
+    ServiceMemo:
+      allOf:
+        - $ref: "#/components/schemas/MemoFields"
+        - type: object
+          required: [id, driveStatus, sheetStatus, createdAt]
+          properties:
+            id: { type: integer }
+            driveStatus: { $ref: "#/components/schemas/SyncStatus" }
+            sheetStatus: { $ref: "#/components/schemas/SyncStatus" }
+            driveImageLink: { type: ["string", "null"] }
+            syncError: { type: ["string", "null"] }
+            createdAt: { type: string, format: date-time }
+    DashboardSummary:
+      type: object
+      required: [todayScans, totalScans, syncedCount, pendingCount, failedCount, recentMemos]
+      properties:
+        todayScans: { type: integer }
+        totalScans: { type: integer }
+        syncedCount: { type: integer }
+        pendingCount: { type: integer }
+        failedCount: { type: integer }
+        recentMemos:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceMemo"
+    AppSettings:
+      type: object
+      required: [driveFolderId, spreadsheetId, sheetName, driveConnected, sheetsConnected]
+      properties:
+        driveFolderId: { type: string }
+        spreadsheetId: { type: string }
+        sheetName: { type: string }
+        driveConnected: { type: boolean }
+        sheetsConnected: { type: boolean }
+    SettingsInput:
+      type: object
+      required: [driveFolderId, spreadsheetId, sheetName]
+      properties:
+        driveFolderId: { type: string }
+        spreadsheetId: { type: string }
+        sheetName: { type: string, minLength: 1 }
+    DriveItem:
+      type: object
+      required: [id, name, kind]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind:
+          type: string
+          enum: [folder, spreadsheet]
+    DriveItemList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DriveItem"
+    SheetTabList:
+      type: object
+      required: [tabs]
+      properties:
+        tabs:
+          type: array
+          items: { type: string }
+

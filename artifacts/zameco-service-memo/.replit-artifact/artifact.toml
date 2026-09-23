@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "ZAMECO I Service Memo Scraper"
+description = "A mobile-first installable web app for ZAMECO I field workers and administrators to scan service memos, enhance and compress document images, extract structured details with AI, review corrections, and sync images and records to Google Drive and Google Sheets."
+version = "1.0.0"
+id = "artifacts/zameco-service-memo"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21731
+
+[services.development]
+run = "pnpm --filter @workspace/zameco-service-memo run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/zameco-service-memo", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/zameco-service-memo/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21731"
+BASE_PATH = "/"
