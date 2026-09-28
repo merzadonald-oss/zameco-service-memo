@@ -121,7 +121,7 @@ router.post("/memos/extract", async (req, res): Promise<void> => {
   const parsed = ExtractMemoBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const response = await openai.chat.completions.create({
-    model: "gpt-5.4-mini",
+        model: process.env["AI_MODEL"] ?? "gpt-5.4-mini",
     max_completion_tokens: 8192,
     response_format: { type: "json_object" },
     messages: [{
