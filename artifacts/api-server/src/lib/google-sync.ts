@@ -1,7 +1,5 @@
-import { ReplitConnectors } from "@replit/connectors-sdk";
+import { googleClient } from "./google-client";
 import type { ServiceMemoRecord } from "@workspace/db";
-
-const connectors = new ReplitConnectors();
 
 export const MEMO_SHEET_COLUMNS = [
   "Service Memo Code",
@@ -35,7 +33,7 @@ export async function uploadMemoImage(
   const query = encodeURIComponent(
     `'${folderId.replaceAll("'", "\\'")}' in parents and name = '${filename.replaceAll("'", "\\'")}' and trashed = false`,
   );
-  const existingResponse = await connectors.proxy(
+  const existingResponse = await googleClient.proxy(
     "google-drive",
     `/drive/v3/files?q=${query}&pageSize=1&fields=files(id,webViewLink)&supportsAllDrives=true&includeItemsFromAllDrives=true`,
   );
@@ -55,7 +53,7 @@ export async function uploadMemoImage(
     `--${boundary}\r\nContent-Type: ${memo.imageMimeType}\r\n\r\n`,
   );
   const suffix = Buffer.from(`\r\n--${boundary}--`);
-  const response = await connectors.proxy(
+  const response = await googleClient.proxy(
     "google-drive",
     "/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink",
     {
@@ -69,7 +67,7 @@ export async function uploadMemoImage(
 }
 
 export async function validateDriveFolder(folderId: string): Promise<void> {
-  const response = await connectors.proxy(
+  const response = await googleClient.proxy(
     "google-drive",
     `/drive/v3/files/${encodeURIComponent(folderId)}?supportsAllDrives=true&fields=id,name,mimeType,trashed`,
     { method: "GET" },
@@ -105,7 +103,7 @@ export async function listDriveItems(
     supportsAllDrives: "true",
     includeItemsFromAllDrives: "true",
   });
-  const response = await connectors.proxy(
+  const response = await googleClient.proxy(
     "google-drive",
     `/drive/v3/files?${params.toString()}`,
     { method: "GET" },
@@ -125,7 +123,7 @@ function sheetRange(sheetName: string, columns: string): string {
 }
 
 async function sheetRequest(path: string, label: string): Promise<Response> {
-  const response = await connectors.proxy("google-sheet", path, { method: "GET" });
+  const response = await googleClient.proxy("google-sheet", path, { method: "GET" });
   if (!response.ok) {
     if (response.status === 404) throw new Error("Google Sheet not found. Select a spreadsheet accessible to the connected Google Sheets account.");
     if (response.status === 403) throw new Error("Google Sheets access denied. Give the connected Google Sheets account access to this spreadsheet.");
@@ -181,7 +179,7 @@ export async function appendMemoRow(
 
   if (existingIndex >= 0) {
     const rowNumber = existingIndex + 1;
-    const response = await connectors.proxy(
+    const response = await googleClient.proxy(
       "google-sheet",
       `/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${sheetRange(sheetName, `A${rowNumber}:J${rowNumber}`)}?valueInputOption=RAW`,
       {
@@ -195,7 +193,7 @@ export async function appendMemoRow(
   }
 
   try {
-    const response = await connectors.proxy(
+    const response = await googleClient.proxy(
       "google-sheet",
       `/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${sheetRange(sheetName, "A:J")}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
       {

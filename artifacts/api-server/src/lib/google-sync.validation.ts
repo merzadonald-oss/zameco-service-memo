@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { ReplitConnectors } from "@replit/connectors-sdk";
+import { googleClient } from "./google-client";
 import type { ServiceMemoRecord } from "@workspace/db";
 import { MEMO_SHEET_COLUMNS, appendMemoRow, memoImageFilename, memoSheetRow, uploadMemoImage } from "./google-sync";
 
@@ -43,14 +43,14 @@ assert.deepEqual(memoSheetRow(memo, "https://drive.example/image"), [
   "https://drive.example/image",
 ]);
 
-const originalProxy = ReplitConnectors.prototype.proxy;
+const originalProxy = googleClient.proxy;
 const files: Array<{ id: string; name: string; webViewLink: string }> = [];
 const rows: string[][] = [Array.from(MEMO_SHEET_COLUMNS)];
 let lostAppendResponse = true;
 let lostUploadResponse = true;
 let appendCount = 0;
 
-ReplitConnectors.prototype.proxy = async (_connector, path, options) => {
+googleClient.proxy = async (_service, path, options) => {
   if (path.startsWith("/drive/v3/files?")) {
     const query = new URL(`https://example.invalid${path}`).searchParams.get("q") ?? "";
     assert.match(query, /'folder-test' in parents/);
@@ -109,7 +109,7 @@ try {
   assert.equal(rows.length, 2, "There should be exactly one memo row");
   assert.deepEqual(rows[1], memoSheetRow(memo, driveLink));
 } finally {
-  ReplitConnectors.prototype.proxy = originalProxy;
+  googleClient.proxy = originalProxy;
 }
 
 console.info("Google sync contract and ambiguous-response retry validation passed");
