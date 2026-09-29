@@ -25,15 +25,24 @@ RUN pnpm install --frozen-lockfile
 # need node_modules at all.
 RUN pnpm --filter @workspace/api-server run build
 
+# Build the website. Its Vite config insists on PORT and BASE_PATH being set
+# even for a production build, so provide them here ("/" = served from the
+# root of the same server as the API).
+RUN PORT=3000 BASE_PATH=/ NODE_ENV=production \
+    pnpm --filter @workspace/zameco-service-memo run build
+
 # ---- Runtime stage ----------------------------------------------------------
 FROM node:22-slim AS runtime
 
 WORKDIR /app
 
-# Only the bundled output is needed at runtime.
+# Only the built output is needed at runtime: the bundled API server and the
+# built website that it serves.
 COPY --from=builder /repo/artifacts/api-server/dist ./dist
+COPY --from=builder /repo/artifacts/zameco-service-memo/dist/public ./public
 
 ENV NODE_ENV=production
+ENV STATIC_DIR=/app/public
 # Cloud Run sets PORT automatically at deploy time; 8080 is its default.
 ENV PORT=8080
 EXPOSE 8080
