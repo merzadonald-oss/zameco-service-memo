@@ -8,7 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { getScanSession, saveScanSession } from "@/lib/scan-session";
 import { processImageCanvas } from "@/lib/image-processing";
-import { useExtractMemo, useGetNextMemoCode } from "@workspace/api-client-react";
+import { useGetNextMemoCode } from "@workspace/api-client-react";
+import { extractFieldsWithOcr, type ExtractProgress } from "@/lib/ocr/fieldOcr";
+import { loadCalibration } from "@/lib/ocr/calibration";
 
 export default function Scan() {
   const [, setLocation] = useLocation();
@@ -76,43 +78,58 @@ export default function Scan() {
   // Fetch next memo code to include in extraction (if needed by API, though we can fetch it now)
   const { data: nextCodeData } = useGetNextMemoCode();
 
-  // Extraction mutation
-  const extractMemo = useExtractMemo({
-    mutation: {
-      onSuccess: (data) => {
-        // Save extracted data and final image to session
-        saveScanSession({
-          imageDataBase64: processedBase64,
-          mimeType: session?.mimeType || 'image/jpeg',
-          extractedData: data
-        } as any); // we will extend ScanSessionData locally in review
-        setLocation("/review");
-      },
-      onError: (err) => {
-        console.error("Extraction failed", err);
-        alert("Failed to extract fields from memo. Please try again or proceed to manual entry.");
-      }
-    }
-  });
+  // On-device OCR extraction state. This runs entirely in the browser via
+  // Tesseract.js against the calibrated field regions - no server call, no
+  // AI key, works offline.
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractProgress, setExtractProgress] = useState<ExtractProgress | null>(null);
 
-  const handleExtract = () => {
+  const handleExtract = async () => {
     if (!processedBase64) return;
-    
-    // Strip the data URL prefix (e.g. data:image/jpeg;base64,)
-    const base64Data = processedBase64.split(",")[1];
-    if (!base64Data) {
-      alert("Invalid image data");
-      return;
-    }
 
-    extractMemo.mutate({
-      data: {
-        imageData: base64Data,
-        imageMimeType: session?.mimeType as any,
+    setIsExtracting(true);
+    setExtractProgress(null);
+    try {
+      const calibration = loadCalibration();
+      const ocrResults = await extractFieldsWithOcr(processedBase64, calibration, setExtractProgress);
+
+      // Flag fields Tesseract itself wasn't confident about, so the review
+      // screen can highlight them for a closer look rather than silently
+      // trusting a low-confidence read.
+      const LOW_CONFIDENCE_THRESHOLD = 55;
+      const warnings = Object.entries(ocrResults)
+        .filter(([, result]) => result.value.length > 0 && result.confidence < LOW_CONFIDENCE_THRESHOLD)
+        .map(([field]) => `Low confidence reading "${field}" - please double-check this field.`);
+
+      const extractedData = {
         serviceMemoCode: nextCodeData?.code || "",
-        dateReceived: nextCodeData?.dateReceived || new Date().toISOString().split("T")[0]
-      }
-    });
+        dateReceived: nextCodeData?.dateReceived || new Date().toISOString().split("T")[0],
+        dateOfServiceMemo: ocrResults.dateOfServiceMemo.value,
+        natureOfComplaint: ocrResults.natureOfComplaint.value,
+        accountNumber: ocrResults.accountNumber.value,
+        consumerName: ocrResults.consumerName.value,
+        address: ocrResults.address.value,
+        totalAmountPaid: ocrResults.totalAmountPaid.value,
+        orArNumber: ocrResults.orArNumber.value,
+        confidence:
+          Object.values(ocrResults).reduce((sum, r) => sum + r.confidence, 0) /
+          (Object.values(ocrResults).length * 100),
+        warnings,
+      };
+
+      saveScanSession({
+        imageDataBase64: processedBase64,
+        mimeType: session?.mimeType || "image/jpeg",
+        extractedData,
+      } as any); // we will extend ScanSessionData locally in review
+      setLocation("/review");
+    } catch (err) {
+      console.error("OCR extraction failed", err);
+      alert("Failed to read fields from memo. Please try again or proceed to manual entry.");
+    } finally {
+      setIsExtracting(false);
+      setExtractProgress(null);
+    }
   };
 
   if (!session) return null;
@@ -122,7 +139,7 @@ export default function Scan() {
       title="Review Scan" 
       showNav={false}
       headerLeft={
-        <Button variant="ghost" size="icon" onClick={() => setLocation("/")} disabled={extractMemo.isPending}>
+        <Button variant="ghost" size="icon" onClick={() => setLocation("/")} disabled={isExtracting}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
       }
@@ -144,14 +161,18 @@ export default function Scan() {
             </div>
           )}
           
-          {extractMemo.isPending && (
+          {isExtracting && (
             <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center backdrop-blur-sm z-50">
               <div className="relative">
                 <Wand2 className="h-12 w-12 text-primary animate-pulse mb-4 relative z-10" />
                 <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full" />
               </div>
-              <p className="text-white font-medium tracking-wide">Extracting Data...</p>
-              <p className="text-white/60 text-sm mt-2">This usually takes a few seconds</p>
+              <p className="text-white font-medium tracking-wide">Reading fields on-device...</p>
+              <p className="text-white/60 text-sm mt-2">
+                {extractProgress
+                  ? `${extractProgress.label} (${extractProgress.index}/${extractProgress.total})`
+                  : "Starting..."}
+              </p>
             </div>
           )}
         </div>
@@ -174,13 +195,13 @@ export default function Scan() {
                   value={[crop.top]} 
                   min={0} max={40} step={1}
                   onValueChange={(v) => setCrop(c => ({ ...c, top: v[0] }))}
-                  disabled={extractMemo.isPending}
+                  disabled={isExtracting}
                 />
                 <Slider 
                   value={[crop.bottom]} 
                   min={0} max={40} step={1}
                   onValueChange={(v) => setCrop(c => ({ ...c, bottom: v[0] }))}
-                  disabled={extractMemo.isPending}
+                  disabled={isExtracting}
                 />
               </div>
               <div className="flex justify-between pt-1">
@@ -191,13 +212,13 @@ export default function Scan() {
                   value={[crop.left]} 
                   min={0} max={40} step={1}
                   onValueChange={(v) => setCrop(c => ({ ...c, left: v[0] }))}
-                  disabled={extractMemo.isPending}
+                  disabled={isExtracting}
                 />
                 <Slider 
                   value={[crop.right]} 
                   min={0} max={40} step={1}
                   onValueChange={(v) => setCrop(c => ({ ...c, right: v[0] }))}
-                  disabled={extractMemo.isPending}
+                  disabled={isExtracting}
                 />
               </div>
             </div>
@@ -208,7 +229,7 @@ export default function Scan() {
                 id="grayscale" 
                 checked={grayscale} 
                 onCheckedChange={setGrayscale} 
-                disabled={extractMemo.isPending}
+                disabled={isExtracting}
               />
             </div>
             
@@ -218,7 +239,7 @@ export default function Scan() {
                 id="contrast" 
                 checked={highContrast} 
                 onCheckedChange={setHighContrast} 
-                disabled={extractMemo.isPending}
+                disabled={isExtracting}
               />
             </div>
 
@@ -233,7 +254,7 @@ export default function Scan() {
                 max={100} 
                 step={5}
                 onValueChange={(v) => setQuality(v[0] / 100)}
-                disabled={extractMemo.isPending}
+                disabled={isExtracting}
               />
             </div>
 
@@ -241,7 +262,7 @@ export default function Scan() {
               size="lg" 
               className="w-full h-14 mt-4 text-lg font-semibold bg-primary hover:bg-accent text-white rounded-xl shadow-lg"
               onClick={handleExtract}
-              disabled={extractMemo.isPending || isProcessing || !originalBlob}
+              disabled={isExtracting || isProcessing || !originalBlob}
             >
               Extract Text <Wand2 className="ml-2 h-5 w-5" />
             </Button>
