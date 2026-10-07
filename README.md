@@ -1,39 +1,32 @@
-# On-device OCR (no AI, no server)
+# OCR calibration fix
 
-Copy each file to the same path in your GitHub repo and commit to `main`.
-pnpm-lock.yaml at the repo root must be included too (it changed because
-tesseract.js was added).
+Only two files changed - both in artifacts/zameco-service-memo/src/lib/ocr/.
+No new dependencies, no lockfile change needed this time.
 
-## New files
-- artifacts/zameco-service-memo/src/lib/ocr/calibration.ts
-- artifacts/zameco-service-memo/src/lib/ocr/fieldOcr.ts
-- artifacts/zameco-service-memo/src/pages/calibrate.tsx
+## What was wrong
+The original calibration was tuned against a raw, loosely-framed photo.
+Your real scan (sent to me directly) was framed much more tightly around
+the paper, so several field boxes landed in slightly the wrong place.
 
-## Changed files
-- artifacts/zameco-service-memo/package.json (added tesseract.js)
-- artifacts/zameco-service-memo/src/App.tsx (registered /calibrate route)
-- artifacts/zameco-service-memo/src/pages/scan.tsx (uses local OCR instead
-  of the server's AI extraction endpoint)
-- pnpm-lock.yaml (repo root)
+## What changed
+- calibration.ts: all seven field positions re-measured against your real
+  scan, with small padding added for tolerance to minor framing variation
+- fieldOcr.ts: added a cleanup pass for number fields (amount, O.R./A.R.
+  number) that strips stray letters while leaving the digits alone, plus
+  two more label-fragment patterns ("ddress:", "rk:") trimmed from text
+  fields
 
-## What this does
-Scanning now reads each field straight from the photo on-device, using
-fixed positions calibrated against a real ZAMECO memo. No OpenAI or
-Gemini call happens during scanning anymore.
+## Verified against your real scan before packaging
+- Name, date, address, nature of complaint, O.R./A.R. number, and total
+  amount all read correctly
+- Account number correctly reads as empty (it's blank on your form)
+- Whole project typecheck: clean
 
-## Verified before packaging
-- Real OCR run (actual Tesseract engine) against your sample memo photo,
-  field positions tuned until every field read correctly
-- Whole project typecheck: clean (pnpm run typecheck)
-- Production build: clean
-
-## Known limitation to solve before the APK
-Tesseract.js downloads its language data from a CDN the first time OCR
-runs, rather than shipping it inside the app. For true offline/no-server
-use this needs to be bundled as a local asset instead - next step once
-we start the APK packaging work.
-
-## Try it
-Visit /calibrate on the deployed site to see the default boxes over a
-scan you upload. Scanning a memo on /scan now runs OCR locally - open
-the browser console to see it working if you want to watch.
+## One real limitation worth knowing
+Two different test photos of the same form - one loosely framed, one
+tightly framed - needed different calibration to read well. This
+calibration is tuned for a scan where the paper fills most of the frame,
+close to how your real scan was taken. For best reliability, try to frame
+every scan that way. If results drift again, send me the actual photo
+(not just a description) the same way you did this time - that's what let
+me fix this precisely rather than guess.

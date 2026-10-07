@@ -58,9 +58,37 @@ function cleanText(raw: string): string {
     .replace(/\s+/g, " ")
     .replace(/^[^A-Za-z0-9₱.]+/, "") // drop leading punctuation/stray glyphs
     .replace(/^(imer|mer|umer)[:;]\s*/i, "") // tail of "...Consumer:"
+    .replace(/^(ddress|dress)[:;]\s*/i, "") // tail of "Address:"
+    .replace(/^(rk|ork)[:;]\s*/i, "") // tail of "...Work:"
     .replace(/^[0-9]?[:;]\s*/, "") // stray leading colon/semicolon fragments
+    .replace(/[;]+\s*$/, "") // stray trailing punctuation
     .trim();
 }
+
+/**
+ * Fields that are purely numbers (amounts, O.R./A.R. numbers, account
+ * numbers) get a stricter cleanup: keep only the longest run of
+ * digits/commas/periods/dashes, discarding stray letters that sometimes
+ * leak in from a nearby brace or line (e.g. "y 177736" -> "177736").
+ *
+ * This does NOT fix genuine character misreads within the digits
+ * themselves (a font that makes Tesseract read "7" as "/" or "0" as "U" on
+ * a specific photo, which we've seen happen) - that class of error is
+ * exactly why low-confidence numeric fields are flagged for the human
+ * reviewing the memo to double-check, not silently trusted.
+ */
+function cleanNumeric(raw: string): string {
+  const matches = raw.match(/[0-9][0-9,.\-\s]*[0-9]|[0-9]/g);
+  if (!matches || matches.length === 0) return "";
+  const longest = matches.reduce((a, b) => (b.length > a.length ? b : a));
+  return longest.replace(/\s+/g, "").trim();
+}
+
+const NUMERIC_FIELDS: ReadonlySet<CalibratedField> = new Set([
+  "accountNumber",
+  "orArNumber",
+  "totalAmountPaid",
+]);
 
 let sharedWorker: Worker | null = null;
 let sharedWorkerPsm: number | null = null;
@@ -114,8 +142,9 @@ export async function extractFieldsWithOcr(
     const worker = await getWorker(region.psm);
     const { data } = await worker.recognize(canvas);
 
+    const cleaned = NUMERIC_FIELDS.has(field) ? cleanNumeric(data.text) : cleanText(data.text);
     results[field] = {
-      value: cleanText(data.text),
+      value: cleaned,
       confidence: data.confidence,
     };
   }

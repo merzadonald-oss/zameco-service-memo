@@ -59,13 +59,13 @@ function region(left: number, top: number, right: number, bottom: number, psm: n
 }
 
 export const ZAMECO_DEFAULT_CALIBRATION: Calibration = {
-  consumerName:      region(0.165, 0.219, 0.75,  0.242, 11),
-  dateOfServiceMemo: region(0.755, 0.219, 0.91,  0.242, 6),
-  accountNumber:     region(0.135, 0.2404, 0.33, 0.2558, 6),
-  address:           region(0.415, 0.2404, 0.89, 0.2558, 11),
-  natureOfComplaint: region(0.245, 0.258,  0.92, 0.2756, 6),
-  orArNumber:        region(0.565, 0.3199, 0.735,0.3545, 6),
-  totalAmountPaid:   region(0.355, 0.4749, 0.58, 0.4898, 6),
+  consumerName:      region(0.16,  0.200, 0.74, 0.225, 11),
+  dateOfServiceMemo: region(0.73,  0.200, 0.97, 0.225, 6),
+  accountNumber:     region(0.08,  0.221, 0.31, 0.245, 6),
+  address:           region(0.38,  0.221, 0.92, 0.245, 11),
+  natureOfComplaint: region(0.20,  0.240, 0.97, 0.265, 6),
+  orArNumber:        region(0.60,  0.330, 0.76, 0.356, 6),
+  totalAmountPaid:   region(0.47,  0.521, 0.62, 0.559, 6),
 };
 
 const STORAGE_KEY = "zameco:ocr-calibration";
