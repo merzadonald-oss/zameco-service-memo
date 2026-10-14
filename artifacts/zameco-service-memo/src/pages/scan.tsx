@@ -9,8 +9,7 @@ import { Slider } from "@/components/ui/slider";
 import { getScanSession, saveScanSession } from "@/lib/scan-session";
 import { processImageCanvas } from "@/lib/image-processing";
 import { useGetNextMemoCode } from "@workspace/api-client-react";
-import { extractFieldsWithOcr, type ExtractProgress } from "@/lib/ocr/fieldOcr";
-import { loadCalibration } from "@/lib/ocr/calibration";
+import { extractFieldsWithOcr, FIELD_LABELS, type ExtractProgress, type FieldKey } from "@/lib/ocr/fieldOcr";
 
 export default function Scan() {
   const [, setLocation] = useLocation();
@@ -79,7 +78,7 @@ export default function Scan() {
   const { data: nextCodeData } = useGetNextMemoCode();
 
   // On-device OCR extraction state. This runs entirely in the browser via
-  // Tesseract.js against the calibrated field regions - no server call, no
+  // Tesseract.js, locating fields by their printed labels - no server call, no
   // AI key, works offline.
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractProgress, setExtractProgress] = useState<ExtractProgress | null>(null);
@@ -90,16 +89,19 @@ export default function Scan() {
     setIsExtracting(true);
     setExtractProgress(null);
     try {
-      const calibration = loadCalibration();
-      const ocrResults = await extractFieldsWithOcr(processedBase64, calibration, setExtractProgress);
+      const { fields: ocrResults, warnings: ocrWarnings } = await extractFieldsWithOcr(processedBase64, setExtractProgress);
 
-      // Flag fields Tesseract itself wasn't confident about, so the review
-      // screen can highlight them for a closer look rather than silently
-      // trusting a low-confidence read.
+      // Besides the checks the reader itself reports (missing fields, amounts that don't
+      // add up), flag any field it wasn't confident about so the review screen
+      // highlights it instead of silently trusting a shaky read.
       const LOW_CONFIDENCE_THRESHOLD = 55;
-      const warnings = Object.entries(ocrResults)
-        .filter(([, result]) => result.value.length > 0 && result.confidence < LOW_CONFIDENCE_THRESHOLD)
-        .map(([field]) => `Low confidence reading "${field}" - please double-check this field.`);
+      const warnings = [
+        ...ocrWarnings,
+        ...(Object.keys(ocrResults) as FieldKey[])
+          .filter((field) => ocrResults[field].value.length > 0 && ocrResults[field].confidence < LOW_CONFIDENCE_THRESHOLD)
+          .map((field) => `Low confidence reading "${FIELD_LABELS[field]}" - please double-check it against the photo.`),
+      ];
+      const readFields = Object.values(ocrResults).filter((r) => r.value.length > 0);
 
       const extractedData = {
         serviceMemoCode: nextCodeData?.code || "",
@@ -111,9 +113,7 @@ export default function Scan() {
         address: ocrResults.address.value,
         totalAmountPaid: ocrResults.totalAmountPaid.value,
         orArNumber: ocrResults.orArNumber.value,
-        confidence:
-          Object.values(ocrResults).reduce((sum, r) => sum + r.confidence, 0) /
-          (Object.values(ocrResults).length * 100),
+        confidence: readFields.length ? readFields.reduce((sum, r) => sum + r.confidence, 0) / (readFields.length * 100) : 0,
         warnings,
       };
 
@@ -167,7 +167,7 @@ export default function Scan() {
                 <Wand2 className="h-12 w-12 text-primary animate-pulse mb-4 relative z-10" />
                 <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full" />
               </div>
-              <p className="text-white font-medium tracking-wide">Reading fields on-device...</p>
+              <p className="text-white font-medium tracking-wide">Reading the memo on-device...</p>
               <p className="text-white/60 text-sm mt-2">
                 {extractProgress
                   ? `${extractProgress.label} (${extractProgress.index}/${extractProgress.total})`

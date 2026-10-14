@@ -1,32 +1,26 @@
-# OCR calibration fix
+# Label-based OCR (replaces the fixed-box version)
 
-Only two files changed - both in artifacts/zameco-service-memo/src/lib/ocr/.
-No new dependencies, no lockfile change needed this time.
+Upload these 4 files to the SAME paths in your GitHub repo (overwrite), commit to main:
 
-## What was wrong
-The original calibration was tuned against a raw, loosely-framed photo.
-Your real scan (sent to me directly) was framed much more tightly around
-the paper, so several field boxes landed in slightly the wrong place.
+  artifacts/zameco-service-memo/src/lib/ocr/fieldOcr.ts      (rewritten)
+  artifacts/zameco-service-memo/src/lib/ocr/labelExtract.ts  (NEW)
+  artifacts/zameco-service-memo/src/pages/scan.tsx           (updated)
+  artifacts/zameco-service-memo/src/App.tsx                  (removes the /calibrate page)
+
+Then DELETE these 2 files on GitHub (no longer used; harmless if left):
+
+  artifacts/zameco-service-memo/src/lib/ocr/calibration.ts
+  artifacts/zameco-service-memo/src/pages/calibrate.tsx
+
+No new dependencies, no lockfile change.
 
 ## What changed
-- calibration.ts: all seven field positions re-measured against your real
-  scan, with small padding added for tolerance to minor framing variation
-- fieldOcr.ts: added a cleanup pass for number fields (amount, O.R./A.R.
-  number) that strips stray letters while leaving the digits alone, plus
-  two more label-fragment patterns ("ddress:", "rk:") trimmed from text
-  fields
+The old version cut the page into fixed boxes, which broke whenever a photo was framed or
+tilted differently. This one reads the whole page, finds the printed labels ("Consumer:",
+"Address:", "Work:", "Amount", ...) wherever they are, straightens a tilted page, then
+re-reads the header lines, amounts and O.R./A.R. column up close.
+It also checks that the amounts add up to the printed total, which catches misread digits.
 
-## Verified against your real scan before packaging
-- Name, date, address, nature of complaint, O.R./A.R. number, and total
-  amount all read correctly
-- Account number correctly reads as empty (it's blank on your form)
-- Whole project typecheck: clean
-
-## One real limitation worth knowing
-Two different test photos of the same form - one loosely framed, one
-tightly framed - needed different calibration to read well. This
-calibration is tuned for a scan where the paper fills most of the frame,
-close to how your real scan was taken. For best reliability, try to frame
-every scan that way. If results drift again, send me the actual photo
-(not just a description) the same way you did this time - that's what let
-me fix this precisely rather than guess.
+## Always check
+The O.R./A.R. number and amounts are the hardest thing for OCR. A digit can be misread
+with no warning (e.g. 6 read as 8). Compare them with the photo before submitting.

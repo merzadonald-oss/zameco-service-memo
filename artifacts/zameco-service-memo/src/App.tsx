@@ -15,7 +15,6 @@ import Scan from '@/pages/scan';
 import Review from '@/pages/review';
 import History from '@/pages/history';
 import Settings from '@/pages/settings';
-import Calibrate from '@/pages/calibrate';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -36,7 +35,6 @@ function Router() {
         <Route path="/review" component={Review} />
         <Route path="/history" component={History} />
         <Route path="/settings" component={Settings} />
-        <Route path="/calibrate" component={Calibrate} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>
