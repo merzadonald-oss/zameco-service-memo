@@ -1,26 +1,26 @@
-# Label-based OCR (replaces the fixed-box version)
+# Test APK (step 1 of the Android conversion)
 
-Upload these 4 files to the SAME paths in your GitHub repo (overwrite), commit to main:
+## 1. Upload these files to GitHub (keep the folders)
+Drag the `artifacts` and `mobile` folders (from INSIDE this unzipped folder) into
+Add file -> Upload files. Before committing, check the paths shown start with
+`artifacts/...` or `mobile/...` and nothing else in front. Commit to main.
 
-  artifacts/zameco-service-memo/src/lib/ocr/fieldOcr.ts      (rewritten)
-  artifacts/zameco-service-memo/src/lib/ocr/labelExtract.ts  (NEW)
-  artifacts/zameco-service-memo/src/pages/scan.tsx           (updated)
-  artifacts/zameco-service-memo/src/App.tsx                  (removes the /calibrate page)
+  artifacts/zameco-service-memo/src/App.tsx        (changed)
+  artifacts/zameco-service-memo/src/lib/native.ts  (new)
+  mobile/package.json, package-lock.json, capacitor.config.json
+  mobile/scripts/prepare-assets.mjs, patch-android.mjs
 
-Then DELETE these 2 files on GitHub (no longer used; harmless if left):
+## 2. Create the build recipe (GitHub can't take dot-folders by upload)
+Add file -> Create new file. In the name box type exactly:
+  .github/workflows/build-apk.yml
+Paste the whole contents of build-apk.yml (in this folder) and commit.
 
-  artifacts/zameco-service-memo/src/lib/ocr/calibration.ts
-  artifacts/zameco-service-memo/src/pages/calibrate.tsx
+## 3. Build the APK
+GitHub -> Actions tab -> "Build Android APK" -> Run workflow.
+Takes roughly 10-15 minutes. When green, open the run and download
+"zameco-memo-apk" from the bottom (a zip containing app-debug.apk).
 
-No new dependencies, no lockfile change.
-
-## What changed
-The old version cut the page into fixed boxes, which broke whenever a photo was framed or
-tilted differently. This one reads the whole page, finds the printed labels ("Consumer:",
-"Address:", "Work:", "Amount", ...) wherever they are, straightens a tilted page, then
-re-reads the header lines, amounts and O.R./A.R. column up close.
-It also checks that the amounts add up to the printed total, which catches misread digits.
-
-## Always check
-The O.R./A.R. number and amounts are the hardest thing for OCR. A digit can be misread
-with no warning (e.g. 6 read as 8). Compare them with the photo before submitting.
+## 4. Install and test on your phone
+Send app-debug.apk to your phone and open it (allow "install unknown apps" if asked).
+This is a TEST build of the scanner. Saving, history and the dashboard still need
+the server and are not expected to work yet.
