@@ -15,8 +15,13 @@ import Scan from '@/pages/scan';
 import Review from '@/pages/review';
 import History from '@/pages/history';
 import Settings from '@/pages/settings';
+import { isNativeApp, configureNativeOcrAssets } from '@/lib/native';
 
-if ('serviceWorker' in navigator) {
+if (isNativeApp()) {
+  // Installed Android app: everything is bundled in the app, so no offline cache is needed
+  // (and a cache could keep serving old files after an app update).
+  configureNativeOcrAssets();
+} else if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(err => {
       console.log('SW registration failed: ', err);
