@@ -1,1 +1,69 @@
+name: Build Android APK
 
+on:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install the web app's dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build the web app
+        run: PORT=3000 BASE_PATH=/ NODE_ENV=production pnpm --filter @workspace/zameco-service-memo... run build
+
+      - name: Install the Android tooling
+        working-directory: mobile
+        run: npm ci
+
+      - name: Gather the files that go inside the app
+        working-directory: mobile
+        run: node scripts/prepare-assets.mjs
+
+      - name: Create the Android project
+        working-directory: mobile
+        run: |
+          npx cap add android || true
+          node scripts/patch-android.mjs
+          npx cap sync android
+
+      - name: Accept Android SDK licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Make Gradle executable
+        working-directory: mobile/android
+        run: chmod +x gradlew
+
+      - name: Build the APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Save the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: zameco-memo-apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
