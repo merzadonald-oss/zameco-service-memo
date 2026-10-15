@@ -1,0 +1,15 @@
+{
+  "name": "zameco-memo-mobile",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Android app wrapper (Capacitor) for the ZAMECO Service Memo web app. Built in the cloud by .github/workflows/build-apk.yml",
+  "type": "module",
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/cli": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "@tesseract.js-data/eng": "1.0.0",
+    "tesseract.js": "6.0.1",
+    "tesseract.js-core": "6.1.2"
+  }
+}

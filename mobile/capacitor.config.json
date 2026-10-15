@@ -1,0 +1,8 @@
+{
+  "appId": "com.zameco.servicememo",
+  "appName": "ZAMECO Memo",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}
