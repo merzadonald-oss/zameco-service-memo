@@ -9,7 +9,8 @@ import { Slider } from "@/components/ui/slider";
 import { getScanSession, saveScanSession } from "@/lib/scan-session";
 import { processImageCanvas } from "@/lib/image-processing";
 import { useGetNextMemoCode } from "@workspace/api-client-react";
-import { extractFieldsWithOcr, FIELD_LABELS, type ExtractProgress, type FieldKey } from "@/lib/ocr/fieldOcr";
+import { extractFieldsWithOcr, terminateOcrWorker, FIELD_LABELS, type ExtractProgress, type FieldKey } from "@/lib/ocr/fieldOcr";
+import { diagnoseOcrEngine } from "@/lib/ocr/diagnostics";
 
 export default function Scan() {
   const [, setLocation] = useLocation();
@@ -82,6 +83,29 @@ export default function Scan() {
   // AI key, works offline.
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractProgress, setExtractProgress] = useState<ExtractProgress | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isChecking, setIsChecking] = useState(false);
+
+  // A running clock while reading, so it is obvious the app is still working (a slow phone can take a while).
+  useEffect(() => {
+    if (!isExtracting) return;
+    setElapsedSeconds(0);
+    const timer = setInterval(() => setElapsedSeconds((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, [isExtracting]);
+
+  // Built-in check of the OCR engine: tests each stage and shows exactly where it fails.
+  const handleCheckEngine = async () => {
+    setIsChecking(true);
+    try {
+      const lines = await diagnoseOcrEngine();
+      alert(lines.join("\n"));
+    } catch (err) {
+      alert(`The check itself failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsChecking(false);
+    }
+  };
 
   const handleExtract = async () => {
     if (!processedBase64) return;
@@ -125,7 +149,10 @@ export default function Scan() {
       setLocation("/review");
     } catch (err) {
       console.error("OCR extraction failed", err);
-      alert("Failed to read fields from memo. Please try again or proceed to manual entry.");
+      const reason = err instanceof Error ? err.message : String(err);
+      // a stuck engine is left running in the background; discard it so the next try starts clean
+      void terminateOcrWorker();
+      alert(`Could not read the memo: ${reason}\n\nYou can try again, enter the details manually, or tap "Test OCR engine" under the Extract button to see what is wrong.`);
     } finally {
       setIsExtracting(false);
       setExtractProgress(null);
@@ -173,6 +200,8 @@ export default function Scan() {
                   ? `${extractProgress.label} (${extractProgress.index}/${extractProgress.total})`
                   : "Starting..."}
               </p>
+              {extractProgress?.detail && <p className="text-white/80 text-sm mt-1">{extractProgress.detail}</p>}
+              <p className="text-white/40 text-xs mt-3">{elapsedSeconds}s</p>
             </div>
           )}
         </div>
@@ -266,6 +295,14 @@ export default function Scan() {
             >
               Extract Text <Wand2 className="ml-2 h-5 w-5" />
             </Button>
+            <button
+              type="button"
+              onClick={handleCheckEngine}
+              disabled={isExtracting || isChecking}
+              className="w-full mt-3 text-sm text-muted-foreground underline disabled:opacity-50"
+            >
+              {isChecking ? "Testing the OCR engine..." : "Test OCR engine"}
+            </button>
           </div>
         </div>
       </div>
