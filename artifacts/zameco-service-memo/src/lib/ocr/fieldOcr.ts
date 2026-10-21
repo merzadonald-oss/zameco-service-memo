@@ -31,6 +31,8 @@ export interface ExtractProgress {
   label: string;
   index: number;
   total: number;
+  /** Live status from the OCR engine itself ("Loading language data", "Reading 37%", ...). */
+  detail?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,11 +62,99 @@ export function configureOcrEngine(options: OcrEngineOptions): void {
 }
 
 let sharedWorker: Worker | null = null;
+let statusListener: ((detail: string) => void) | null = null;
+let lastStatus = "";
+
+/** Which copy of the engine is in use: the one bundled in the app, or the one downloaded from the internet. */
+export let engineSource: "bundled" | "online" | "not started" = "not started";
+
+/** The options currently in effect (exposed for the built-in OCR check). */
+export function getOcrEngineOptions(): OcrEngineOptions {
+  return engineOptions;
+}
+
+function describeStatus(message: { status: string; progress: number }): string {
+  const pct = Math.round((message.progress ?? 0) * 100);
+  switch (message.status) {
+    case "loading tesseract core":
+      return "Loading the OCR engine";
+    case "initializing tesseract":
+      return "Starting the OCR engine";
+    case "loading language traineddata":
+      return pct > 0 && pct < 100 ? `Loading language data ${pct}%` : "Loading language data";
+    case "loaded language traineddata":
+      return "Language data loaded";
+    case "initializing api":
+      return "Preparing the reader";
+    case "recognizing text":
+      return `Reading the text ${pct}%`;
+    default:
+      return message.status;
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} did not respond within ${Math.round(ms / 1000)} seconds (last status: ${lastStatus || "none"}).`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
+ * Starts the engine. Tesseract.js reports a problem loading its own files (a missing file, a
+ * blocked request) only through its error handler and then waits forever instead of failing, so
+ * that report is turned into an immediate failure here rather than a silent hang.
+ */
+function startWorker(options: Omit<OcrEngineOptions, "imageInput" | "debug">): Promise<Worker> {
+  let failNow: (error: Error) => void = () => undefined;
+  const failed = new Promise<never>((_, reject) => {
+    failNow = reject;
+  });
+  const started = createWorker("eng", 1, {
+    ...options,
+    logger: (message) => {
+      lastStatus = describeStatus(message);
+      statusListener?.(lastStatus);
+    },
+    errorHandler: (error: unknown) => {
+      const text = error instanceof Error ? error.message : String((error as { message?: string })?.message ?? error);
+      lastStatus = `error: ${text}`;
+      console.error("OCR engine error", error);
+      failNow(new Error(`The OCR engine reported an error while starting: ${text}`));
+    },
+  });
+  return Promise.race([started, failed]);
+}
+
+const ENGINE_START_SECONDS = 60;
 
 async function getWorker(): Promise<Worker> {
-  if (!sharedWorker) {
-    const { imageInput: _input, debug: _debug, ...workerOptions } = engineOptions;
-    sharedWorker = await createWorker("eng", 1, workerOptions);
+  if (sharedWorker) return sharedWorker;
+  const { imageInput: _input, debug: _debug, ...bundled } = engineOptions;
+  const hasBundledFiles = Boolean(bundled.workerPath || bundled.corePath || bundled.langPath);
+
+  try {
+    sharedWorker = await withTimeout(startWorker(bundled), ENGINE_START_SECONDS * 1000, "The OCR engine");
+    engineSource = hasBundledFiles ? "bundled" : "online";
+  } catch (error) {
+    // If the copy bundled in the app can't start (for example the phone's web view won't serve
+    // its files to a background worker), fall back to downloading the engine, so scanning still
+    // works whenever there is a connection. The built-in OCR check reports which one is in use.
+    const online = typeof navigator === "undefined" || navigator.onLine !== false;
+    if (!hasBundledFiles || !online) throw error;
+    console.warn("Bundled OCR engine failed, trying the online copy", error);
+    statusListener?.("Bundled engine failed - trying the online copy");
+    sharedWorker = await withTimeout(startWorker({}), ENGINE_START_SECONDS * 1000, "The online OCR engine");
+    engineSource = "online";
   }
   return sharedWorker;
 }
@@ -74,6 +164,7 @@ export async function terminateOcrWorker(): Promise<void> {
   if (sharedWorker) {
     await sharedWorker.terminate();
     sharedWorker = null;
+    engineSource = "not started";
   }
 }
 
@@ -239,7 +330,7 @@ async function readWords(canvas: HTMLCanvasElement, pageSegMode: string, stage =
   const worker = await getWorker();
   await worker.setParameters({ tessedit_pageseg_mode: pageSegMode as never });
   const input = engineOptions.imageInput ? engineOptions.imageInput(canvas) : canvas;
-  const { data } = await worker.recognize(input, {}, { blocks: true });
+  const { data } = await withTimeout(worker.recognize(input, {}, { blocks: true }), 240 * 1000, "Reading the image");
   const words: OcrWord[] = [];
   for (const block of data.blocks ?? []) {
     for (const paragraph of block.paragraphs) {
@@ -292,38 +383,65 @@ export async function extractFieldsWithOcr(
   imageDataUrl: string,
   onProgress?: (progress: ExtractProgress) => void,
 ): Promise<OcrOutcome> {
-  const total = 4;
-  const step = (index: number, label: string) => onProgress?.({ label, index, total });
+  try {
+    const total = 4;
+    let current = { index: 1, label: "Reading the page" };
+    const step = (index: number, label: string) => {
+      current = { index, label };
+      onProgress?.({ label, index, total });
+    };
+    // live detail from the engine (loading, reading 37%, ...) shown under the current step
+    statusListener = (detail) => onProgress?.({ ...current, total, detail });
 
-  const img = await loadImage(imageDataUrl);
-  const original = drawToCanvas(img);
+    const img = await loadImage(imageDataUrl);
+    const original = drawToCanvas(img);
 
-  step(1, "Reading the page");
-  const fullPage = await readWords(original, SPARSE_TEXT, "full page");
-  let result: LabelExtractionResult = extractFromWords(fullPage, original.width, original.height);
+    step(1, "Reading the page");
+    const fullPage = await readWords(original, SPARSE_TEXT, "full page");
+    let result: LabelExtractionResult = extractFromWords(fullPage, original.width, original.height);
 
-  const page = straighten(original, result.skew);
+    const page = straighten(original, result.skew);
 
-  step(2, "Reading the header lines");
-  const rows = result.rowRegions;
-  const consumer = await reread(page, rows.consumer, 2, SINGLE_LINE, "consumer row");
-  const address = await reread(page, rows.address, 2, SINGLE_LINE, "address row");
-  const nature = await reread(page, rows.nature, 2, SINGLE_COLUMN, "nature row");
-  result = applyHeaderRowReads(result, { consumer, address, nature });
+    step(2, "Reading the header lines");
+    const rows = result.rowRegions;
+    const consumer = await reread(page, rows.consumer, 2, SINGLE_LINE, "consumer row");
+    const address = await reread(page, rows.address, 2, SINGLE_LINE, "address row");
+    const nature = await reread(page, rows.nature, 2, SINGLE_COLUMN, "nature row");
+    result = applyHeaderRowReads(result, { consumer, address, nature });
 
-  step(3, "Checking the amounts");
-  const amounts = await reread(page, result.amountRegion, 3, SINGLE_BLOCK, "amounts");
-  if (amounts) result = applyAmountRefinement(result, amounts);
+    step(3, "Checking the amounts");
+    const amounts = await reread(page, result.amountRegion, 3, SINGLE_BLOCK, "amounts");
+    if (amounts) result = applyAmountRefinement(result, amounts);
 
-  step(4, "Checking the O.R./A.R. number");
-  const orArReads = [await reread(page, result.orArRegion, 3, SINGLE_BLOCK, "or/ar 3x"), await reread(page, result.orArRegion, 4, SINGLE_COLUMN, "or/ar 4x")].filter(
-    (r): r is OcrWord[] => r !== undefined,
-  );
-  if (orArReads.length > 0) result = applyOrArRefinement(result, orArReads);
+    step(4, "Checking the O.R./A.R. number");
+    const orArReads = [await reread(page, result.orArRegion, 3, SINGLE_BLOCK, "or/ar 3x"), await reread(page, result.orArRegion, 4, SINGLE_COLUMN, "or/ar 4x")].filter(
+      (r): r is OcrWord[] => r !== undefined,
+    );
+    if (orArReads.length > 0) result = applyOrArRefinement(result, orArReads);
 
-  const fields = {} as OcrResults;
-  (Object.keys(result.fields) as FieldKey[]).forEach((key) => {
-    fields[key] = { value: result.fields[key].value, confidence: result.fields[key].confidence };
-  });
-  return { fields, warnings: result.warnings };
+    const fields = {} as OcrResults;
+    (Object.keys(result.fields) as FieldKey[]).forEach((key) => {
+      fields[key] = { value: result.fields[key].value, confidence: result.fields[key].confidence };
+    });
+    return { fields, warnings: result.warnings };
+  } finally {
+    statusListener = null;
+  }
+}
+
+/** For the built-in OCR check: the engine's text for a small canvas, as one line. */
+export async function readTextForCheck(canvas: HTMLCanvasElement): Promise<string> {
+  const words = await readWords(canvas, SINGLE_LINE, "check");
+  return words.map((w) => w.text).join(" ");
+}
+
+/** For the built-in OCR check: start the engine and report which copy ended up in use. */
+export async function startEngineForCheck(onStatus: (detail: string) => void): Promise<typeof engineSource> {
+  statusListener = onStatus;
+  try {
+    await getWorker();
+    return engineSource;
+  } finally {
+    statusListener = null;
+  }
 }
